@@ -1,0 +1,6 @@
+{
+  "name": "Project Management Platform",
+  "description": "Real-Time Team Project Management Platform with Predictive Insights — Phase 0-2 Auth & User Administration",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

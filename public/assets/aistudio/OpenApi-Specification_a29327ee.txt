@@ -1,0 +1,2824 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Real-Time Team Project Management Platform with Predictive Insights",
+    "version": "2.1.0",
+    "summary": "FYP SRS v2.1 - design-ready API baseline",
+    "description": "REST API for the Real-Time Team Project Management Platform. Implements authentication, RBAC, team/project/task management, Kanban workflow, dependencies, collaboration, notifications, attachments, analytics, append-only audit trail, and rule-based PIRAE risk insights.\n\n**Auth:** Access JWT (15 min) + Redis refresh session + JTI blacklist\n\n**Status enums:** task = [TODO, IN_PROGRESS, DONE]; priority = [LOW, MEDIUM, HIGH, CRITICAL]\n\n**Rate limit:** 100 requests / 15 min / authenticated user\n\n**PIRAE:** Advisory only - never autonomously mutates project state",
+    "contact": {
+      "name": "FYP Team 2K23/SWEE/21"
+    },
+    "license": {
+      "name": "Academic FYP - University of Sindh"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://api.fyp.local/api/v1",
+      "description": "Production (Docker Compose + Nginx)"
+    },
+    {
+      "url": "http://localhost:3000/api/v1",
+      "description": "Local development"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Auth",
+      "description": "Authentication, session, token lifecycle (UC-01, FR-AUTH-01..12)"
+    },
+    {
+      "name": "Users",
+      "description": "User administration and profiles (UC-02, UC-03)"
+    },
+    {
+      "name": "Teams",
+      "description": "Team and membership management (UC-04, FR-TEAM-01..05)"
+    },
+    {
+      "name": "Projects",
+      "description": "Project lifecycle and members (UC-05, UC-06)"
+    },
+    {
+      "name": "Tasks",
+      "description": "Task CRUD, assignment, subtasks (UC-07, UC-17)"
+    },
+    {
+      "name": "Kanban",
+      "description": "Kanban workflow and status transitions (UC-08)"
+    },
+    {
+      "name": "Dependencies",
+      "description": "Task dependency graph (UC-09)"
+    },
+    {
+      "name": "Comments",
+      "description": "Comments, mentions, 15-minute edit window (UC-11)"
+    },
+    {
+      "name": "Notifications",
+      "description": "Persistent + real-time notifications (UC-12)"
+    },
+    {
+      "name": "Attachments",
+      "description": "Controlled file uploads (UC-13)"
+    },
+    {
+      "name": "Analytics",
+      "description": "Project and workload analytics (UC-14)"
+    },
+    {
+      "name": "Audit",
+      "description": "Append-only audit trail (UC-15)"
+    },
+    {
+      "name": "PIRAE",
+      "description": "Predictive Insights & Risk Analytics Engine (UC-16) - advisory only"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "paths": {
+    "/auth/login": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Authenticate user and issue tokens",
+        "operationId": "authLogin",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/SuccessResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/TokenPair"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "423": {
+            "description": "Account locked (5 failed attempts / 15 min - NFR-SEC-06)"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/auth/refresh": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Exchange refresh token for a new access token",
+        "operationId": "authRefresh",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "refreshToken"
+                ],
+                "properties": {
+                  "refreshToken": {
+                    "type": "string",
+                    "minLength": 32
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "New access token issued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/SuccessResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/TokenPair"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Logout: blacklist access JTI and revoke refresh session (AC-AUTH-11)",
+        "operationId": "authLogout",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/NoContentSuccess"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Get current authenticated user",
+        "operationId": "authMe",
+        "responses": {
+          "200": {
+            "description": "Current user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/SuccessResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/User"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/auth/password": {
+      "patch": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Change own password (revokes all refresh sessions)",
+        "operationId": "authChangePassword",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "currentPassword",
+                  "newPassword"
+                ],
+                "properties": {
+                  "currentPassword": {
+                    "type": "string",
+                    "minLength": 8
+                  },
+                  "newPassword": {
+                    "type": "string",
+                    "minLength": 8,
+                    "pattern": "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[^A-Za-z0-9]).{8,}$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/NoContentSuccess"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/auth/register": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Admin-provisioned account creation (CA-04: no public self-registration)",
+        "operationId": "authRegister",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateUserRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "User created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/SuccessResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/User"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/users": {
+      "get": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "List users (admin only)",
+        "operationId": "listUsers",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PageParam"
+          },
+          {
+            "$ref": "#/components/parameters/LimitParam"
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "role",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/GlobalRole"
+            }
+          },
+          {
+            "name": "isActive",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated users",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/SuccessResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/User"
+                          }
+                        },
+                        "meta": {
+                          "$ref": "#/components/schemas/PaginationMeta"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Create user (admin only)",
+        "operationId": "createUser",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateUserRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "User created"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/users/{userId}/role": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/UserIdParam"
+        }
+      ],
+      "patch": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Change user global role (admin only)",
+        "operationId": "updateUserRole",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "globalRole"
+                ],
+                "properties": {
+                  "globalRole": {
+                    "$ref": "#/components/schemas/GlobalRole"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Role updated"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/users/{userId}/status": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/UserIdParam"
+        }
+      ],
+      "patch": {
+        "tags": [
+          "Users"
+        ],
+        "summary": "Activate / deactivate user (admin only, FR-AUTH-07)",
+        "operationId": "updateUserStatus",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "isActive"
+                ],
+                "properties": {
+                  "isActive": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Status updated"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/teams": {
+      "get": {
+        "tags": [
+          "Teams"
+        ],
+        "summary": "List teams visible to caller",
+        "operationId": "listTeams",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PageParam"
+          },
+          {
+            "$ref": "#/components/parameters/LimitParam"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated teams"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Teams"
+        ],
+        "summary": "Create team (Administrator only, FR-AUTH-12 / CA-05)",
+        "operationId": "createTeam",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTeamRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Team created"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/teams/{teamId}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TeamIdParam"
+        }
+      ],
+      "get": {
+        "tags": [
+          "Teams"
+        ],
+        "summary": "Get team details",
+        "operationId": "getTeam",
+        "responses": {
+          "200": {
+            "description": "Team"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Teams"
+        ],
+        "summary": "Update team",
+        "operationId": "updateTeam",
+        "responses": {
+          "200": {
+            "description": "Updated"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Teams"
+        ],
+        "summary": "Delete team (admin only)",
+        "operationId": "deleteTeam",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/NoContentSuccess"
+          }
+        }
+      }
+    },
+    "/teams/{teamId}/members": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TeamIdParam"
+        }
+      ],
+      "get": {
+        "tags": [
+          "Teams"
+        ],
+        "summary": "List team members",
+        "operationId": "listTeamMembers",
+        "responses": {
+          "200": {
+            "description": "Members"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Teams"
+        ],
+        "summary": "Add team member (Admin/PM)",
+        "operationId": "addTeamMember",
+        "responses": {
+          "201": {
+            "description": "Added"
+          }
+        }
+      }
+    },
+    "/teams/{teamId}/members/{userId}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TeamIdParam"
+        },
+        {
+          "$ref": "#/components/parameters/UserIdParam"
+        }
+      ],
+      "delete": {
+        "tags": [
+          "Teams"
+        ],
+        "summary": "Remove team member",
+        "operationId": "removeTeamMember",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/NoContentSuccess"
+          }
+        }
+      }
+    },
+    "/projects": {
+      "get": {
+        "tags": [
+          "Projects"
+        ],
+        "summary": "List projects visible to caller (FR-PROJ-05)",
+        "operationId": "listProjects",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PageParam"
+          },
+          {
+            "$ref": "#/components/parameters/LimitParam"
+          },
+          {
+            "name": "teamId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/ProjectStatus"
+            }
+          },
+          {
+            "name": "priority",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/Priority"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated projects"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Projects"
+        ],
+        "summary": "Create project (Admin/PM, FR-PROJ-01)",
+        "operationId": "createProject",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProjectRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Project created"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
+          }
+        }
+      }
+    },
+    "/projects/{projectId}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ProjectIdParam"
+        }
+      ],
+      "get": {
+        "tags": [
+          "Projects"
+        ],
+        "summary": "Get project by ID",
+        "operationId": "getProject",
+        "responses": {
+          "200": {
+            "description": "Project"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Projects"
+        ],
+        "summary": "Update project (Manager+ only)",
+        "operationId": "updateProject",
+        "responses": {
+          "200": {
+            "description": "Updated"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Projects"
+        ],
+        "summary": "Archive project (Manager+)",
+        "operationId": "archiveProject",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/NoContentSuccess"
+          }
+        }
+      }
+    },
+    "/projects/{projectId}/members": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ProjectIdParam"
+        }
+      ],
+      "get": {
+        "tags": [
+          "Projects"
+        ],
+        "summary": "List project members",
+        "operationId": "listProjectMembers",
+        "responses": {
+          "200": {
+            "description": "Members"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Projects"
+        ],
+        "summary": "Add project member with role (FR-PROJ-04)",
+        "operationId": "addProjectMember",
+        "responses": {
+          "201": {
+            "description": "Added"
+          }
+        }
+      }
+    },
+    "/projects/{projectId}/members/{userId}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ProjectIdParam"
+        },
+        {
+          "$ref": "#/components/parameters/UserIdParam"
+        }
+      ],
+      "patch": {
+        "tags": [
+          "Projects"
+        ],
+        "summary": "Change project member role",
+        "operationId": "updateProjectMemberRole",
+        "responses": {
+          "200": {
+            "description": "Updated"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Projects"
+        ],
+        "summary": "Remove project member",
+        "operationId": "removeProjectMember",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/NoContentSuccess"
+          }
+        }
+      }
+    },
+    "/projects/{projectId}/progress": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ProjectIdParam"
+        }
+      ],
+      "get": {
+        "tags": [
+          "Projects",
+          "Analytics"
+        ],
+        "summary": "Project progress snapshot (FR-PROJ-05, FR-AN-01)",
+        "operationId": "getProjectProgress",
+        "responses": {
+          "200": {
+            "description": "Progress",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/SuccessResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/ProjectProgress"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{projectId}/tasks": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ProjectIdParam"
+        }
+      ],
+      "get": {
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "List project tasks (FR-TASK-01..09)",
+        "operationId": "listProjectTasks",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PageParam"
+          },
+          {
+            "$ref": "#/components/parameters/LimitParam"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/TaskStatus"
+            }
+          },
+          {
+            "name": "priority",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/Priority"
+            }
+          },
+          {
+            "name": "assigneeId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated tasks"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Create task (FR-TASK-01)",
+        "operationId": "createTask",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTaskRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Task created"
+          }
+        }
+      }
+    },
+    "/tasks/{taskId}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TaskIdParam"
+        }
+      ],
+      "get": {
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Get task by ID",
+        "operationId": "getTask",
+        "responses": {
+          "200": {
+            "description": "Task"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Update task (FR-TASK-02)",
+        "operationId": "updateTask",
+        "responses": {
+          "200": {
+            "description": "Updated"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Delete/archive task (FR-TASK-03)",
+        "operationId": "deleteTask",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/NoContentSuccess"
+          }
+        }
+      }
+    },
+    "/tasks/{taskId}/status": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TaskIdParam"
+        }
+      ],
+      "patch": {
+        "tags": [
+          "Kanban"
+        ],
+        "summary": "Change task status - Kanban transition (FR-KAN-02, AC-KAN-03)",
+        "operationId": "updateTaskStatus",
+        "description": "Validates dependency completion before allowing DONE (FR-TASK-15). Triggers real-time `task.status_changed` and PIRAE re-evaluation.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "status"
+                ],
+                "properties": {
+                  "status": {
+                    "$ref": "#/components/schemas/TaskStatus"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Status updated"
+          },
+          "409": {
+            "description": "Blocked: open dependencies prevent transition to DONE (FR-TASK-15)"
+          }
+        }
+      }
+    },
+    "/tasks/{taskId}/assignees": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TaskIdParam"
+        }
+      ],
+      "post": {
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Assign user to task (FR-TASK-04)",
+        "operationId": "assignTask",
+        "responses": {
+          "200": {
+            "description": "Assignee added"
+          }
+        }
+      }
+    },
+    "/tasks/{taskId}/assignees/{userId}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TaskIdParam"
+        },
+        {
+          "$ref": "#/components/parameters/UserIdParam"
+        }
+      ],
+      "delete": {
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Unassign user from task",
+        "operationId": "unassignTask",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/NoContentSuccess"
+          }
+        }
+      }
+    },
+    "/tasks/{taskId}/subtasks": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TaskIdParam"
+        }
+      ],
+      "post": {
+        "tags": [
+          "Tasks"
+        ],
+        "summary": "Add subtask (FR-TASK-06)",
+        "operationId": "addSubtask",
+        "responses": {
+          "200": {
+            "description": "Subtask added"
+          }
+        }
+      }
+    },
+    "/tasks/{taskId}/history": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TaskIdParam"
+        }
+      ],
+      "get": {
+        "tags": [
+          "Tasks",
+          "Audit"
+        ],
+        "summary": "Task change history (FR-TASK-09)",
+        "operationId": "getTaskHistory",
+        "responses": {
+          "200": {
+            "description": "History"
+          }
+        }
+      }
+    },
+    "/tasks/{taskId}/dependencies": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TaskIdParam"
+        }
+      ],
+      "get": {
+        "tags": [
+          "Dependencies"
+        ],
+        "summary": "List dependencies of a task (FR-TASK-07)",
+        "operationId": "listTaskDependencies",
+        "responses": {
+          "200": {
+            "description": "Dependencies"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Dependencies"
+        ],
+        "summary": "Add blocking dependency",
+        "operationId": "addTaskDependency",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "blockingTaskId"
+                ],
+                "properties": {
+                  "blockingTaskId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "BLOCKS"
+                    ],
+                    "default": "BLOCKS"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Dependency created"
+          },
+          "409": {
+            "description": "Dependency cycle detected"
+          }
+        }
+      }
+    },
+    "/tasks/{taskId}/dependencies/{dependencyId}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TaskIdParam"
+        },
+        {
+          "name": "dependencyId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "delete": {
+        "tags": [
+          "Dependencies"
+        ],
+        "summary": "Remove dependency",
+        "operationId": "removeTaskDependency",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/NoContentSuccess"
+          }
+        }
+      }
+    },
+    "/tasks/{taskId}/comments": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/TaskIdParam"
+        }
+      ],
+      "get": {
+        "tags": [
+          "Comments"
+        ],
+        "summary": "List task comments (FR-COMM-01)",
+        "operationId": "listTaskComments",
+        "responses": {
+          "200": {
+            "description": "comments"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Comments"
+        ],
+        "summary": "Add comment with optional mentions (FR-COMM-01, FR-COMM-02)",
+        "operationId": "createComment",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "body"
+                ],
+                "properties": {
+                  "body": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 5000
+                  },
+                  "mentions": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Comment created"
+          }
+        }
+      }
+    },
+    "/comments/{commentId}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/CommentIdParam"
+        }
+      ],
+      "patch": {
+        "tags": [
+          "Comments"
+        ],
+        "summary": "Edit own comment within 15 minutes (FR-COMM-03, AC-COL-03)",
+        "operationId": "updateComment",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "body"
+                ],
+                "properties": {
+                  "body": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 5000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Comment updated"
+          },
+          "403": {
+            "description": "Not author OR 15-minute window expired"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Comments"
+        ],
+        "summary": "Delete comment (FR-COMM-05)",
+        "operationId": "deleteComment",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/NoContentSuccess"
+          }
+        }
+      }
+    },
+    "/notifications": {
+      "get": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "List notifications for current user (FR-NOTIF-02)",
+        "operationId": "listNotifications",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PageParam"
+          },
+          {
+            "$ref": "#/components/parameters/LimitParam"
+          },
+          {
+            "name": "unreadOnly",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Notifications"
+          }
+        }
+      }
+    },
+    "/notifications/{notificationId}/read": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/NotificationIdParam"
+        }
+      ],
+      "patch": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "Mark notification as read",
+        "operationId": "markNotificationRead",
+        "responses": {
+          "200": {
+            "description": "Marked read"
+          }
+        }
+      }
+    },
+    "/notifications/read-all": {
+      "patch": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "Mark all notifications as read",
+        "operationId": "markAllNotificationsRead",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/NoContentSuccess"
+          }
+        }
+      }
+    },
+    "/attachments": {
+      "post": {
+        "tags": [
+          "Attachments"
+        ],
+        "summary": "Upload attachment linked to task XOR comment (FR-ATT-01..05, AC-DATA-07)",
+        "operationId": "uploadAttachment",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  },
+                  "taskId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "commentId": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Uploaded"
+          },
+          "413": {
+            "description": "File exceeds 10 MB"
+          },
+          "415": {
+            "description": "Unsupported MIME type"
+          }
+        }
+      }
+    },
+    "/attachments/{attachmentId}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/AttachmentIdParam"
+        }
+      ],
+      "get": {
+        "tags": [
+          "Attachments"
+        ],
+        "summary": "Download attachment",
+        "operationId": "downloadAttachment",
+        "responses": {
+          "200": {
+            "description": "Binary file"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Attachments"
+        ],
+        "summary": "Delete attachment (FR-ATT-04)",
+        "operationId": "deleteAttachment",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/NoContentSuccess"
+          }
+        }
+      }
+    },
+    "/analytics/projects/{projectId}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ProjectIdParam"
+        }
+      ],
+      "get": {
+        "tags": [
+          "Analytics"
+        ],
+        "summary": "Project analytics (FR-AN-01..10)",
+        "operationId": "getProjectAnalytics",
+        "responses": {
+          "200": {
+            "description": "Analytics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/SuccessResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/ProjectAnalytics"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/analytics/projects/{projectId}/workload": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ProjectIdParam"
+        }
+      ],
+      "get": {
+        "tags": [
+          "Analytics"
+        ],
+        "summary": "Project workload distribution (FR-AN-04)",
+        "operationId": "getProjectWorkload",
+        "responses": {
+          "200": {
+            "description": "Workload"
+          }
+        }
+      }
+    },
+    "/analytics/projects/{projectId}/overdue": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ProjectIdParam"
+        }
+      ],
+      "get": {
+        "tags": [
+          "Analytics"
+        ],
+        "summary": "Overdue tasks (FR-AN-02)",
+        "operationId": "getOverdueTasks",
+        "responses": {
+          "200": {
+            "description": "Overdue tasks"
+          }
+        }
+      }
+    },
+    "/audit": {
+      "get": {
+        "tags": [
+          "Audit"
+        ],
+        "summary": "Query audit trail (Admin/PM; FR-AUD-01..06)",
+        "operationId": "listAuditLogs",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PageParam"
+          },
+          {
+            "$ref": "#/components/parameters/LimitParam"
+          },
+          {
+            "name": "entityType",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "entityId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "actorId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "CREATE",
+                "UPDATE",
+                "DELETE"
+              ]
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Audit entries"
+          }
+        }
+      }
+    },
+    "/audit/{auditId}": {
+      "parameters": [
+        {
+          "name": "auditId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "Audit"
+        ],
+        "summary": "Get a single audit record",
+        "operationId": "getAuditLog",
+        "responses": {
+          "200": {
+            "description": "Audit entry"
+          }
+        }
+      }
+    },
+    "/risks": {
+      "get": {
+        "tags": [
+          "PIRAE"
+        ],
+        "summary": "List risk assessments (PM/Admin; FR-PIRAE-07)",
+        "operationId": "listRisks",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/PageParam"
+          },
+          {
+            "$ref": "#/components/parameters/LimitParam"
+          },
+          {
+            "name": "projectId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "riskType",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/RiskType"
+            }
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/Severity"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "Open",
+                "Resolved"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Risks"
+          }
+        }
+      }
+    },
+    "/risks/projects/{projectId}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ProjectIdParam"
+        }
+      ],
+      "get": {
+        "tags": [
+          "PIRAE"
+        ],
+        "summary": "Latest risk snapshot for a project (FR-PIRAE-07)",
+        "operationId": "getProjectRisks",
+        "responses": {
+          "200": {
+            "description": "Risks"
+          }
+        }
+      }
+    },
+    "/risks/{riskId}": {
+      "parameters": [
+        {
+          "name": "riskId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "tags": [
+          "PIRAE"
+        ],
+        "summary": "Get single risk assessment",
+        "operationId": "getRisk",
+        "responses": {
+          "200": {
+            "description": "Risk"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/risks/{riskId}/resolve": {
+      "parameters": [
+        {
+          "name": "riskId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "patch": {
+        "tags": [
+          "PIRAE"
+        ],
+        "summary": "Mark risk resolved (PM/Admin; FR-PIRAE-08). Advisory only.",
+        "description": "Does NOT modify project state. Human decision only. PIRAE remains advisory (SRS 4.13 decision boundary).",
+        "operationId": "resolveRisk",
+        "responses": {
+          "200": {
+            "description": "Resolved"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Short-lived access JWT (15 min). Obtained via POST /auth/login. JTI blacklisted on logout (FR-AUTH-11, CA-06)."
+      }
+    },
+    "parameters": {
+      "PageParam": {
+        "name": "page",
+        "in": "query",
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1
+        }
+      },
+      "LimitParam": {
+        "name": "limit",
+        "in": "query",
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 20
+        }
+      },
+      "UserIdParam": {
+        "name": "userId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "TeamIdParam": {
+        "name": "teamId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "ProjectIdParam": {
+        "name": "projectId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "TaskIdParam": {
+        "name": "taskId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "CommentIdParam": {
+        "name": "commentId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "NotificationIdParam": {
+        "name": "notificationId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "AttachmentIdParam": {
+        "name": "attachmentId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      }
+    },
+    "responses": {
+      "NoContentSuccess": {
+        "description": "Operation successful"
+      },
+      "Unauthorized": {
+        "description": "Missing/invalid/blacklisted token (HTTP 401)"
+      },
+      "Forbidden": {
+        "description": "Authenticated but not authorized (HTTP 403)"
+      },
+      "NotFound": {
+        "description": "Resource not found (HTTP 404)"
+      },
+      "Conflict": {
+        "description": "State conflict (HTTP 409)"
+      },
+      "ValidationError": {
+        "description": "Zod validation failed (HTTP 422) - NFR-SEC-03"
+      },
+      "RateLimited": {
+        "description": "Rate limit exceeded (HTTP 429) - 100 req / 15 min"
+      }
+    },
+    "schemas": {
+      "SuccessResponse": {
+        "type": "object",
+        "required": [
+          "success"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "required": [
+          "success",
+          "error"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": false
+          },
+          "error": {
+            "type": "object",
+            "required": [
+              "code",
+              "message"
+            ],
+            "properties": {
+              "code": {
+                "type": "string",
+                "example": "TASK_NOT_FOUND"
+              },
+              "message": {
+                "type": "string",
+                "example": "Task does not exist."
+              }
+            }
+          }
+        }
+      },
+      "PaginationMeta": {
+        "type": "object",
+        "required": [
+          "page",
+          "limit",
+          "total",
+          "totalPages"
+        ],
+        "properties": {
+          "page": {
+            "type": "integer",
+            "example": 1
+          },
+          "limit": {
+            "type": "integer",
+            "example": 20
+          },
+          "total": {
+            "type": "integer",
+            "example": 150
+          },
+          "totalPages": {
+            "type": "integer",
+            "example": 8
+          }
+        }
+      },
+      "GlobalRole": {
+        "type": "string",
+        "enum": [
+          "Administrator",
+          "Project Manager",
+          "Team Member",
+          "Viewer"
+        ]
+      },
+      "ProjectRole": {
+        "type": "string",
+        "enum": [
+          "Manager",
+          "Contributor",
+          "Viewer"
+        ]
+      },
+      "TaskStatus": {
+        "type": "string",
+        "enum": [
+          "TODO",
+          "IN_PROGRESS",
+          "DONE"
+        ],
+        "description": "CA-01 frozen three-column Kanban status"
+      },
+      "Priority": {
+        "type": "string",
+        "enum": [
+          "LOW",
+          "MEDIUM",
+          "HIGH",
+          "CRITICAL"
+        ],
+        "description": "CA-09 frozen priority enum"
+      },
+      "ProjectStatus": {
+        "type": "string",
+        "enum": [
+          "Active",
+          "OnHold",
+          "Completed",
+          "Archived"
+        ]
+      },
+      "RiskType": {
+        "type": "string",
+        "enum": [
+          "WORKLOAD",
+          "DELAY",
+          "DEPENDENCY",
+          "PRIORITY"
+        ]
+      },
+      "Severity": {
+        "type": "string",
+        "enum": [
+          "Low",
+          "Medium",
+          "High",
+          "Critical"
+        ]
+      },
+      "LoginRequest": {
+        "type": "object",
+        "required": [
+          "email",
+          "password"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 8
+          }
+        }
+      },
+      "TokenPair": {
+        "type": "object",
+        "required": [
+          "accessToken",
+          "refreshToken",
+          "expiresIn"
+        ],
+        "properties": {
+          "accessToken": {
+            "type": "string"
+          },
+          "refreshToken": {
+            "type": "string"
+          },
+          "expiresIn": {
+            "type": "integer",
+            "description": "Access token lifetime in seconds (900 = 15 min)",
+            "example": 900
+          }
+        }
+      },
+      "User": {
+        "type": "object",
+        "required": [
+          "id",
+          "email",
+          "fullName",
+          "globalRole",
+          "isActive",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "fullName": {
+            "type": "string"
+          },
+          "globalRole": {
+            "$ref": "#/components/schemas/GlobalRole"
+          },
+          "configuredCapacityHours": {
+            "type": "integer",
+            "minimum": 10,
+            "maximum": 80,
+            "default": 40
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CreateUserRequest": {
+        "type": "object",
+        "required": [
+          "email",
+          "password",
+          "fullName",
+          "globalRole"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "maxLength": 255
+          },
+          "password": {
+            "type": "string",
+            "minLength": 8,
+            "pattern": "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[^A-Za-z0-9]).{8,}$"
+          },
+          "fullName": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "globalRole": {
+            "$ref": "#/components/schemas/GlobalRole"
+          },
+          "configuredCapacityHours": {
+            "type": "integer",
+            "minimum": 10,
+            "maximum": 80,
+            "default": 40
+          }
+        }
+      },
+      "Team": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CreateTeamRequest": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "Project": {
+        "type": "object",
+        "required": [
+          "id",
+          "teamId",
+          "title",
+          "status",
+          "priority"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "teamId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/ProjectStatus"
+          },
+          "priority": {
+            "$ref": "#/components/schemas/Priority"
+          },
+          "deadline": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CreateProjectRequest": {
+        "type": "object",
+        "required": [
+          "teamId",
+          "title"
+        ],
+        "properties": {
+          "teamId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 150
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "priority": {
+            "$ref": "#/components/schemas/Priority"
+          },
+          "deadline": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "ProjectProgress": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "totalTasks": {
+            "type": "integer"
+          },
+          "completedTasks": {
+            "type": "integer"
+          },
+          "overdueTasks": {
+            "type": "integer"
+          },
+          "completionPercentage": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          }
+        }
+      },
+      "Subtask": {
+        "type": "object",
+        "required": [
+          "title",
+          "done"
+        ],
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "done": {
+            "type": "boolean"
+          }
+        }
+      },
+      "Task": {
+        "type": "object",
+        "required": [
+          "id",
+          "projectId",
+          "title",
+          "status",
+          "priority"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "projectId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/TaskStatus"
+          },
+          "priority": {
+            "$ref": "#/components/schemas/Priority"
+          },
+          "dueDate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "estimatedEffort": {
+            "type": "number",
+            "minimum": 0
+          },
+          "subtasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Subtask"
+            }
+          },
+          "assigneeIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CreateTaskRequest": {
+        "type": "object",
+        "required": [
+          "title",
+          "status",
+          "priority"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/TaskStatus"
+          },
+          "priority": {
+            "$ref": "#/components/schemas/Priority"
+          },
+          "dueDate": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "estimatedEffort": {
+            "type": "number",
+            "minimum": 0
+          },
+          "assigneeIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        }
+      },
+      "TaskDependency": {
+        "type": "object",
+        "required": [
+          "id",
+          "blockingTaskId",
+          "blockedTaskId",
+          "type"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "blockingTaskId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "blockedTaskId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "BLOCKS"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Comment": {
+        "type": "object",
+        "required": [
+          "id",
+          "taskId",
+          "authorId",
+          "body",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "taskId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "authorId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "body": {
+            "type": "string"
+          },
+          "mentions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "Notification": {
+        "type": "object",
+        "required": [
+          "id",
+          "userId",
+          "type",
+          "payload",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string"
+          },
+          "payload": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "readAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Attachment": {
+        "type": "object",
+        "required": [
+          "id",
+          "storageKey",
+          "mimeType",
+          "fileSize",
+          "uploadedBy",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "taskId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "commentId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "storageKey": {
+            "type": "string"
+          },
+          "mimeType": {
+            "type": "string"
+          },
+          "fileSize": {
+            "type": "integer"
+          },
+          "uploadedBy": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ProjectAnalytics": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "totalTasks": {
+            "type": "integer"
+          },
+          "completedTasks": {
+            "type": "integer"
+          },
+          "overdueTasks": {
+            "type": "integer"
+          },
+          "completionPercentage": {
+            "type": "number"
+          },
+          "statusDistribution": {
+            "type": "object",
+            "properties": {
+              "TODO": {
+                "type": "integer"
+              },
+              "IN_PROGRESS": {
+                "type": "integer"
+              },
+              "DONE": {
+                "type": "integer"
+              }
+            }
+          },
+          "priorityDistribution": {
+            "type": "object",
+            "properties": {
+              "LOW": {
+                "type": "integer"
+              },
+              "MEDIUM": {
+                "type": "integer"
+              },
+              "HIGH": {
+                "type": "integer"
+              },
+              "CRITICAL": {
+                "type": "integer"
+              }
+            }
+          }
+        }
+      },
+      "WorkloadEntry": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "fullName": {
+            "type": "string"
+          },
+          "activeTaskCount": {
+            "type": "integer"
+          },
+          "estimatedActiveHours": {
+            "type": "number"
+          },
+          "configuredCapacityHours": {
+            "type": "integer"
+          },
+          "workloadRatio": {
+            "type": "number"
+          },
+          "overdueCount": {
+            "type": "integer"
+          },
+          "highPriorityActiveCount": {
+            "type": "integer"
+          }
+        }
+      },
+      "AuditLog": {
+        "type": "object",
+        "required": [
+          "id",
+          "entityType",
+          "entityId",
+          "action",
+          "correlationId",
+          "timestamp"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "actorId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "entityType": {
+            "type": "string"
+          },
+          "entityId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "CREATE",
+              "UPDATE",
+              "DELETE"
+            ]
+          },
+          "oldValues": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true
+          },
+          "newValues": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true
+          },
+          "correlationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "RiskAssessment": {
+        "type": "object",
+        "required": [
+          "id",
+          "projectId",
+          "riskType",
+          "riskScore",
+          "severity",
+          "reason",
+          "recommendation",
+          "status",
+          "generatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "projectId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "riskType": {
+            "$ref": "#/components/schemas/RiskType"
+          },
+          "riskScore": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "severity": {
+            "$ref": "#/components/schemas/Severity"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "recommendation": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "Open",
+              "Resolved"
+            ]
+          },
+          "resolvedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "generatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    }
+  },
+  "x-fyp-metadata": {
+    "baseline": "SRS v2.1",
+    "criticalDecisions": [
+      "CA-01 status enum = TODO, IN_PROGRESS, DONE",
+      "CA-04 admin-provisioned accounts only",
+      "CA-05 team creation = Administrator only",
+      "CA-06 access JWT (15m) + Redis refresh session + JTI blacklist",
+      "CA-07 13 real-time events over Socket.IO",
+      "CA-08 PIRAE async (BullMQ) + daily cron",
+      "CA-11 relational task_dependencies table",
+      "CA-14 4-level workload risk thresholds",
+      "CA-15 delay risk formula + >20% override",
+      "CA-18 unified permission matrix",
+      "CA-20 frozen NFRs"
+    ],
+    "realTimeContracts": {
+      "protocol": "Socket.IO over WSS",
+      "rooms": [
+        "project:{projectId}",
+        "user:{userId}"
+      ],
+      "events": [
+        "task.created",
+        "task.updated",
+        "task.status_changed",
+        "task.assigned",
+        "task.deleted",
+        "comment.created",
+        "comment.updated",
+        "comment.deleted",
+        "project.updated",
+        "notification.created",
+        "risk.detected",
+        "risk.updated",
+        "membership.changed"
+      ]
+    }
+  }
+}
